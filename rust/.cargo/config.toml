@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0
+# SPDX-FileCopyrightText: 2026 Callan Barrett
+
+# Use the system C compiler as the linker on Linux. Rust's default (rust-lld /
+# LLVM lld) rejects non-PIC relocations in static archives, but the Zaparoo
+# CMake static libs are built without -fPIC for the C++ executable. GCC's
+# linker handles this correctly. This does not affect the ARM32 cross-build,
+# which sets its linker explicitly in the toolchain configuration.
+[target.x86_64-unknown-linux-gnu]
+linker = "cc"

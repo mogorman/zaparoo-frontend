@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0
+# SPDX-FileCopyrightText: 2026 Callan Barrett
+
+[package]
+name = "zaparoo-launcher-rs"
+version = "0.1.0"
+edition = "2021"
+
+# Phase 3 will add: cxx-qt, cxx-qt-lib, tokio, serde, serde_json, toml, tracing, …
+
+[[bin]]
+name = "launcher-rs"
+path = "src/main.rs"
+
+[build-dependencies]
+cc = "1"

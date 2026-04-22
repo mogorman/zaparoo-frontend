@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0
+# SPDX-FileCopyrightText: 2026 Callan Barrett
+
+[workspace]
+members = ["launcher"]
+resolver = "2"

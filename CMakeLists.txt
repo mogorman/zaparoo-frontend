@@ -19,6 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # The ARM32 Docker build overrides this via -DBUILD_SHARED_LIBS=OFF in the toolchain.
 option(BUILD_SHARED_LIBS "Build shared libraries (required for LGPL desktop builds)" ON)
 option(ZAPAROO_BUILD_TESTS "Build unit/smoke tests" ON)
+option(ZAPAROO_BUILD_RUST "Build the Rust launcher (launcher-rs) alongside the C++ launcher" OFF)
 option(ZAPAROO_DEV "Development mode: windowed window and dev core endpoint" OFF)
 
 if(ZAPAROO_DEV)
@@ -55,6 +56,12 @@ add_subdirectory(src/app)
 if(ZAPAROO_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Rust build — opt-in so the default C++ workflow is unaffected.
+# All Zaparoo QML CMake targets must exist before ZaparooRust is included.
+if(ZAPAROO_BUILD_RUST)
+    include(ZaparooRust)
 endif()
 
 # Lint targets — included last so all_qmllint already exists.
