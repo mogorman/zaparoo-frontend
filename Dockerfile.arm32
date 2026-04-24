@@ -12,7 +12,8 @@
 # Then build the application (fast, < 1 min):
 #   ./scripts/build-arm32.sh
 
-FROM zaparoo/qt6-arm32-mister:6.7.2 AS app-build
+ARG TOOLCHAIN_IMAGE=zaparoo/qt6-arm32-mister:6.7.2
+FROM ${TOOLCHAIN_IMAGE} AS app-build
 
 # cxx-qt's build script resolves Qt paths via qmake, which returns
 # sysroot-prefixed paths (e.g. {sysroot}/opt/qt6-arm32/...). Symlink Qt
