@@ -18,7 +18,11 @@ permissions:
   contents: read
 
 env:
-  QT_VERSION: "6.7.2"
+  # 6.8.x LTS — 6.7.2's CMake machinery generates `--alias-cycle=error`
+  # for qmllint, but the same version's qmllint binary rejects that level.
+  # The ARM32 static build still pins Qt 6.7.2 (built from source in its
+  # own toolchain image); this env is only for desktop CI via aqtinstall.
+  QT_VERSION: "6.8.3"
 
 jobs:
   rust-lint:
