@@ -18,11 +18,13 @@ permissions:
   contents: read
 
 env:
-  # 6.8.x LTS — 6.7.2's CMake machinery generates `--alias-cycle=error`
-  # for qmllint, but the same version's qmllint binary rejects that level.
-  # The ARM32 static build still pins Qt 6.7.2 (built from source in its
-  # own toolchain image); this env is only for desktop CI via aqtinstall.
-  QT_VERSION: "6.8.3"
+  # 6.10.x LTS — earlier versions' CMake machinery emits `--alias-cycle=error`
+  # (and similar `=error` levels) to qmllint, but the `error` level was only
+  # added to qmllint in 6.10. 6.7.2 and 6.8.3 qmllint both reject it with
+  # "Invalid logging level 'error'". The ARM32 static build still pins
+  # Qt 6.7.2 (built from source in its own toolchain image); this env is
+  # only for desktop CI via aqtinstall.
+  QT_VERSION: "6.10.3"
 
 jobs:
   rust-lint:
@@ -50,6 +52,10 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
+          # QT_VERSION contributes to cache key — cxx-qt-lib's build.rs bakes
+          # Qt library paths and linker flags into target/, so stale cache
+          # from a different Qt version leaves dangling `-l` refs.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST QT"
       - uses: taiki-e/install-action@74e87cbfa15a59692b158178d8905a61bf6fca95 # v2
         with:
           tool: cargo-deny
@@ -84,6 +90,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST QT"
       - uses: taiki-e/install-action@74e87cbfa15a59692b158178d8905a61bf6fca95 # v2
         with:
           tool: cargo-nextest
@@ -114,6 +121,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST QT"
       - name: Configure
         run: cmake --preset desktop-debug
       - name: Build
@@ -153,6 +161,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST QT"
       - name: Configure (required for compile_commands.json)
         run: cmake --preset desktop-debug
       - name: Build (autogen + moc outputs needed by clang-tidy)
