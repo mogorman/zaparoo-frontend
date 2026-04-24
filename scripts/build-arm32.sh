@@ -20,7 +20,15 @@ if [ ! -f "${VERSION_FILE}" ]; then
     echo "       (PROJECT_ROOT=${PROJECT_ROOT})" >&2
     exit 1
 fi
-TOOLCHAIN_VERSION="$(cat "${VERSION_FILE}")"
+# tr -d strips the trailing newline and guards against stray whitespace
+# that would silently corrupt the Docker tag.
+TOOLCHAIN_VERSION="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+if ! printf '%s' "${TOOLCHAIN_VERSION}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+    echo "Error: invalid toolchain version in ${VERSION_FILE}" >&2
+    echo "       raw value: '${TOOLCHAIN_VERSION}'" >&2
+    echo "       expected:  Docker tag [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}" >&2
+    exit 1
+fi
 # CI sets TOOLCHAIN_IMAGE to a GHCR tag; local dev defaults to the image
 # produced by build-toolchain.sh, whose tag derives from toolchain/VERSION.
 TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-zaparoo/qt6-arm32-mister:${TOOLCHAIN_VERSION}}"

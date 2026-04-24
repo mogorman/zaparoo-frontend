@@ -19,7 +19,13 @@ if [ ! -f "${VERSION_FILE}" ]; then
     echo "       (PROJECT_ROOT=${PROJECT_ROOT})" >&2
     exit 1
 fi
-TOOLCHAIN_VERSION="$(cat "${VERSION_FILE}")"
+TOOLCHAIN_VERSION="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+if ! printf '%s' "${TOOLCHAIN_VERSION}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+    echo "Error: invalid toolchain version in ${VERSION_FILE}" >&2
+    echo "       raw value: '${TOOLCHAIN_VERSION}'" >&2
+    echo "       expected:  Docker tag [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}" >&2
+    exit 1
+fi
 IMAGE_TAG="zaparoo/qt6-arm32-mister:${TOOLCHAIN_VERSION}"
 
 echo "=== Building Qt 6.7.2 ARM32 toolchain image (${TOOLCHAIN_VERSION}) ==="

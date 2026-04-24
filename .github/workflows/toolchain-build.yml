@@ -50,13 +50,21 @@ jobs:
           if [ -n "${INPUT_VERSION}" ]; then
             VERSION="${INPUT_VERSION}"
           elif [ -f toolchain/VERSION ]; then
-            VERSION=$(cat toolchain/VERSION)
+            VERSION=$(tr -d '[:space:]' < toolchain/VERSION)
           else
             echo "Error: no inputs.version provided and toolchain/VERSION is missing" >&2
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building toolchain version: $VERSION"
+          # Docker tag grammar: first char [A-Za-z0-9_], then up to 127 of
+          # [A-Za-z0-9_.-]. Validating here surfaces a typo with a clear
+          # message instead of deep inside docker manifest inspect / push.
+          if ! printf '%s' "${VERSION}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+            echo "Error: version '${VERSION}' is not a valid Docker tag" >&2
+            echo "       (must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127})" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${VERSION}" >> "$GITHUB_OUTPUT"
+          printf 'Building toolchain version: %s\n' "${VERSION}"
 
       - name: Set lowercase repository owner
         run: |
