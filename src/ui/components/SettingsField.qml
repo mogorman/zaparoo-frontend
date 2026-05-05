@@ -37,6 +37,7 @@ Item {
 
     signal hovered()
     signal clicked()
+    signal rightClicked()
     // Emitted when the action-control row receives an accept press.
     // The screen wires this to the matching invokable (start/cancel
     // index, start/cancel scrape) and gates by `actionStatus`.
@@ -180,7 +181,8 @@ Item {
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        cursorShape: Qt.PointingHandCursor
 
         onEntered: root.hovered()
         // Action rows fire `accepted()` (the screen runs start/cancel
@@ -188,11 +190,14 @@ Item {
         // moves focus and toggles a value). Emitting both for action
         // rows used to make `onClicked` and `onAccepted` race over
         // the same press.
-        onClicked: {
-            if (root.control === "action")
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton) {
+                root.rightClicked()
+            } else if (root.control === "action") {
                 root.accepted();
-            else
+            } else {
                 root.clicked();
+            }
         }
     }
 }

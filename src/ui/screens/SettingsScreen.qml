@@ -434,6 +434,12 @@ Item {
 
     // ── Visual tree ───────────────────────────────────────────────────────────
 
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        onClicked: settings.requestHubScreen()
+    }
+
     TopStatusStrip {
         id: topStrip
         anchors.left: parent.left
@@ -597,6 +603,7 @@ Item {
                             else if (row.modelData.id === "debugLogging")
                                 settings._toggleDebugLogging()
                         }
+                        onRightClicked: settings.requestHubScreen()
                         // Action rows route through `onAccepted` only
                         // (see `SettingsField.qml`'s MouseArea), so
                         // the focus commit lives here too — clicking

@@ -196,6 +196,7 @@ Item {
 
                         MouseArea {
                             anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: modal.cancelRequested()
                         }
                     }
@@ -229,6 +230,7 @@ Item {
 
                         MouseArea {
                             anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: modal.accepted()
                         }
                     }
@@ -280,6 +282,7 @@ Item {
 
                             MouseArea {
                                 anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     modal._focusYes = false
                                     modal.cancelRequested()
@@ -308,6 +311,7 @@ Item {
 
                             MouseArea {
                                 anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     modal._focusYes = true
                                     modal.confirmed()

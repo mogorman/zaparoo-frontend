@@ -585,6 +585,9 @@ MainLayout {
     Connections {
         target: root.recentsScreen
         function onRequestHubScreen(): void { root._goto(root.screenHub) }
+        function onRequestContextMenu(index: int, anchorRect): void {
+            root.openContextMenu("recents", index, anchorRect)
+        }
     }
     Connections {
         target: root.settingsScreen
@@ -697,6 +700,9 @@ MainLayout {
         if (owner === "systems") {
             return [{ id: "launch_system", label: qsTr("Launch core") }]
         }
+        if (owner === "recents") {
+            return [{ id: "launch_game", label: qsTr("Launch game") }]
+        }
         if (owner === "games" || owner === "favorites") {
             if (entryType === "directory" || entryType === "root")
                 return []
@@ -734,6 +740,9 @@ MainLayout {
             if (index >= Browse.FavoritesModel.count)
                 return
             isFavorite = Browse.FavoritesModel.is_favorite_at(index)
+        } else if (owner === "recents") {
+            if (index >= Browse.RecentsModel.count)
+                return
         }
         const entries = root.buildContextMenuEntries(
             owner, entryType, Browse.SystemStatus.has_nfc, isFavorite)
@@ -769,6 +778,8 @@ MainLayout {
         } else if (id === "launch_game") {
             if (owner === "favorites")
                 Browse.FavoritesModel.launch_at(targetIndex)
+            else if (owner === "recents")
+                Browse.RecentsModel.launch_at(targetIndex)
             else
                 Browse.GamesModel.launch_at(targetIndex)
         } else if (id === "toggle_favorite") {

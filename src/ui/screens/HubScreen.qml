@@ -420,6 +420,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
 
                     onEntered: hub._focusCategory(cellItem.index)
                     onClicked: {
@@ -501,6 +502,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
 
                     onEntered: hub._focusAction(actionCellItem.index)
                     onClicked: {
