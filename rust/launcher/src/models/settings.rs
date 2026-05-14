@@ -4,9 +4,8 @@
 //
 // `Browse.Settings` — gamepad-accessible settings form. The model is the
 // seam between the QML form and the persistence/runtime side: it owns
-// curated picker lists, remembers what the user picked, and on MiSTer
-// re-runs `vmode` when the resolution changes so the framebuffer updates
-// immediately.
+// curated picker lists, remembers what the user picked, and writes
+// restart-applied settings back to config/state.
 //
 // Field design:
 //   * `is_mister` — CONSTANT. Drives whether MiSTer-only fields render
@@ -49,21 +48,19 @@
 // Launcher-owned durable settings are mirrored into both `state.toml`
 // and `launcher.toml`. `state.toml` keeps the in-process snapshot
 // coherent; `launcher.toml` is the durable copy that survives MiSTer's
-// `/tmp` lifecycle. Resolution is intentionally excluded from the config
-// mirror for now and remains state/session-backed only because startup
-// mode switching is not trusted yet. Button layout only changes the QML
+// `/tmp` lifecycle and is what startup `vmode` / translator install
+// read on the next process launch. Button layout only changes the QML
 // resource path used by help-bar icons, browse layout selects the game
 // browsing presentation, mouse support drives the QML cursor/input blocker,
 // and language still takes effect on the next launch because Qt installs
 // translators only at startup.
 
-use crate::mister_runtime;
 use crate::models::{with_persist_mut, with_persist_read};
 use cxx_qt::{CxxQtType, Initialize};
 use cxx_qt_lib::{QString, QStringList};
 use std::pin::Pin;
 use tracing::warn;
-use zaparoo_core::config::{load_config, save_settings_mirror, Config};
+use zaparoo_core::config::{load_config, save_settings_mirror, Config, SettingsMirror};
 use zaparoo_core::persist::{self, SettingsState};
 use zaparoo_core::platform_paths::config_file_path;
 use zaparoo_core::runtime;
@@ -209,20 +206,10 @@ impl ffi::Settings {
             return;
         }
         let value_str = value.to_string();
-        // Persist before `vmode` so a runtime fault mid-switch still
-        // leaves the session/state snapshot coherent for the next run.
+        // Resolution is restart-applied, so this setter only updates the
+        // durable state/config read by the next launcher process.
         let snapshot = persist_settings(|s| s.resolution.clone_from(&value_str));
         mirror_settings_to_config(&config_file_path(), &snapshot.settings);
-        // Apply the framebuffer change *before* notifying QML. `vmode`
-        // swaps the linuxfb mode in place and leaves stale pixels in
-        // any region Qt's dirty tracker doesn't already know about; the
-        // QML side hooks `current_resolution_changed` to scrub them
-        // with a one-frame full-screen repaint, which only works if
-        // vmode has already finished by the time the signal fires.
-        // Runtime disabled code:
-        if let Some((w, h)) = mister_runtime::parse_resolution(&value_str) {
-            mister_runtime::run_vmode(w, h);
-        }
         self.as_mut().rust_mut().current_resolution = value;
         self.as_mut().current_resolution_changed();
     }
@@ -331,12 +318,15 @@ fn persist_if_changed(current: &SettingsState, merged: &SettingsState) {
 fn mirror_settings_to_config(config_path: &std::path::Path, settings: &SettingsState) {
     if let Err(e) = save_settings_mirror(
         config_path,
-        settings.language.as_str(),
-        settings.browse_layout.as_str(),
-        settings.button_layout.as_str(),
-        settings.mouse_enabled,
-        settings.debug_logging,
-        settings.screensaver_timeout.as_str(),
+        SettingsMirror {
+            resolution: settings.resolution.as_str(),
+            language: settings.language.as_str(),
+            browse_layout: settings.browse_layout.as_str(),
+            button_layout: settings.button_layout.as_str(),
+            mouse_enabled: settings.mouse_enabled,
+            debug_logging: settings.debug_logging,
+            screensaver_timeout: settings.screensaver_timeout.as_str(),
+        },
     ) {
         warn!(
             "could not save settings mirror to {}: {e}",
@@ -347,7 +337,11 @@ fn mirror_settings_to_config(config_path: &std::path::Path, settings: &SettingsS
 
 fn merge_settings(snapshot: &SettingsState, config: &Config) -> SettingsState {
     SettingsState {
-        resolution: snapshot.resolution.clone(),
+        resolution: if config.video_explicit {
+            format!("{}x{}", config.video_width, config.video_height)
+        } else {
+            String::new()
+        },
         language: normalize_language(&config.language).to_string(),
         browse_layout: normalize_browse_layout(
             config

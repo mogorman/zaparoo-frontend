@@ -19,7 +19,7 @@ pub struct Config {
     /// distinguish "user wants the default 1920x1080" (in which case the
     /// preview canvas would be too large to upscale into a desktop window)
     /// from "user didn't write a [video] section at all" (in which case
-    /// `--crt` falls back to the 384x224 `native_video_writer` canvas).
+    /// `--crt` overrides this to the 320x240 `native_video_writer` canvas).
     pub video_explicit: bool,
     pub debug_logging: bool,
     /// Language override for the UI, passed to `QTranslator` via the
@@ -48,6 +48,17 @@ pub struct SettingsConfig {
     pub button_layout: Option<String>,
     pub mouse_enabled: Option<bool>,
     pub screensaver_timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsMirror<'a> {
+    pub resolution: &'a str,
+    pub language: &'a str,
+    pub browse_layout: &'a str,
+    pub button_layout: &'a str,
+    pub mouse_enabled: bool,
+    pub debug_logging: bool,
+    pub screensaver_timeout: &'a str,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -207,15 +218,7 @@ pub fn load_config(path: &Path) -> Config {
     cfg
 }
 
-pub fn save_settings_mirror(
-    path: &Path,
-    language: &str,
-    browse_layout: &str,
-    button_layout: &str,
-    mouse_enabled: bool,
-    debug_logging: bool,
-    screensaver_timeout: &str,
-) -> Result<(), String> {
+pub fn save_settings_mirror(path: &Path, mirror: SettingsMirror<'_>) -> Result<(), String> {
     let mut table = if path.exists() {
         let src = std::fs::read_to_string(path)
             .map_err(|e| format!("could not read {}: {e}", path.display()))?;
@@ -236,8 +239,26 @@ pub fn save_settings_mirror(
     };
     general.insert(
         "language".into(),
-        toml::Value::String(normalize_language_override(language)),
+        toml::Value::String(normalize_language_override(mirror.language)),
     );
+
+    let video_value = table
+        .entry("video")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let Some(video) = video_value.as_table_mut() else {
+        return Err(format!(
+            "config key [video] in {} is not a table",
+            path.display()
+        ));
+    };
+    video.remove("backend");
+    if let Some((width, height)) = parse_resolution_override(mirror.resolution) {
+        video.insert("width".into(), toml::Value::Integer(i64::from(width)));
+        video.insert("height".into(), toml::Value::Integer(i64::from(height)));
+    } else {
+        video.remove("width");
+        video.remove("height");
+    }
 
     let settings_value = table
         .entry("settings")
@@ -250,16 +271,19 @@ pub fn save_settings_mirror(
     };
     settings.insert(
         "browse_layout".into(),
-        toml::Value::String(browse_layout.trim().to_string()),
+        toml::Value::String(mirror.browse_layout.trim().to_string()),
     );
     settings.insert(
         "button_layout".into(),
-        toml::Value::String(button_layout.trim().to_string()),
+        toml::Value::String(mirror.button_layout.trim().to_string()),
     );
-    settings.insert("mouse_enabled".into(), toml::Value::Boolean(mouse_enabled));
+    settings.insert(
+        "mouse_enabled".into(),
+        toml::Value::Boolean(mirror.mouse_enabled),
+    );
     settings.insert(
         "screensaver_timeout".into(),
-        toml::Value::String(screensaver_timeout.trim().to_string()),
+        toml::Value::String(mirror.screensaver_timeout.trim().to_string()),
     );
 
     let logging_value = table
@@ -271,11 +295,7 @@ pub fn save_settings_mirror(
             path.display()
         ));
     };
-    logging.insert("debug".into(), toml::Value::Boolean(debug_logging));
-
-    if let Some(video) = table.get_mut("video").and_then(toml::Value::as_table_mut) {
-        video.remove("backend");
-    }
+    logging.insert("debug".into(), toml::Value::Boolean(mirror.debug_logging));
 
     let serialized =
         toml::to_string(&table).map_err(|e| format!("config serialisation failed: {e}"))?;
@@ -326,6 +346,22 @@ fn normalize_language_override(value: &str) -> String {
     }
 }
 
+fn parse_resolution_override(value: &str) -> Option<(u32, u32)> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (width, height) = trimmed
+        .split_once('x')
+        .or_else(|| trimmed.split_once('X'))?;
+    let width = width.trim().parse().ok()?;
+    let height = height.trim().parse().ok()?;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
 fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -366,7 +402,7 @@ mod tests {
         reason = "tests should fail-fast on unexpected errors"
     )]
 
-    use super::{load_config, save_notice_ack, save_settings_mirror, Config};
+    use super::{load_config, save_notice_ack, save_settings_mirror, Config, SettingsMirror};
     use std::io::Write;
 
     fn write_tmp(contents: &str) -> tempfile::NamedTempFile {
@@ -550,9 +586,24 @@ mod tests {
     fn save_settings_mirror_creates_sections() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("launcher.toml");
-        save_settings_mirror(&path, "it_IT", "list", "b", false, true, "300").expect("save");
+        save_settings_mirror(
+            &path,
+            SettingsMirror {
+                resolution: "1280x720",
+                language: "it_IT",
+                browse_layout: "list",
+                button_layout: "b",
+                mouse_enabled: false,
+                debug_logging: true,
+                screensaver_timeout: "300",
+            },
+        )
+        .expect("save");
         let cfg = load_config(&path);
         assert_eq!(cfg.language, "it_IT");
+        assert_eq!(cfg.video_width, 1280);
+        assert_eq!(cfg.video_height, 720);
+        assert!(cfg.video_explicit);
         assert_eq!(cfg.settings.browse_layout.as_deref(), Some("list"));
         assert_eq!(cfg.settings.button_layout.as_deref(), Some("b"));
         assert_eq!(cfg.settings.mouse_enabled, Some(false));
@@ -565,7 +616,19 @@ mod tests {
         let f = write_tmp(
             "[core]\nendpoint = \"ws://example.com/api\"\n[video]\nbackend = \"native-core-poc\"\nwidth = 1280\nheight = 720\n",
         );
-        save_settings_mirror(f.path(), "en", "grid", "a", true, false, "60").expect("save");
+        save_settings_mirror(
+            f.path(),
+            SettingsMirror {
+                resolution: "1280x720",
+                language: "en",
+                browse_layout: "grid",
+                button_layout: "a",
+                mouse_enabled: true,
+                debug_logging: false,
+                screensaver_timeout: "60",
+            },
+        )
+        .expect("save");
         let written = std::fs::read_to_string(f.path()).expect("read");
         assert!(!written.contains("backend"));
         let cfg = load_config(f.path());
@@ -583,7 +646,19 @@ mod tests {
     #[test]
     fn save_settings_mirror_normalizes_auto() {
         let f = write_tmp("");
-        save_settings_mirror(f.path(), "", "list", "c", false, true, "off").expect("save");
+        save_settings_mirror(
+            f.path(),
+            SettingsMirror {
+                resolution: "",
+                language: "",
+                browse_layout: "list",
+                button_layout: "c",
+                mouse_enabled: false,
+                debug_logging: true,
+                screensaver_timeout: "off",
+            },
+        )
+        .expect("save");
         let written = std::fs::read_to_string(f.path()).expect("read");
         assert!(written.contains("language = \"auto\""));
         assert!(written.contains("browse_layout = \"list\""));
@@ -593,6 +668,7 @@ mod tests {
         assert!(written.contains("debug = true"));
         let cfg = load_config(f.path());
         assert_eq!(cfg.language, "");
+        assert!(!cfg.video_explicit);
         assert_eq!(cfg.settings.browse_layout.as_deref(), Some("list"));
         assert_eq!(cfg.settings.button_layout.as_deref(), Some("c"));
         assert_eq!(cfg.settings.mouse_enabled, Some(false));

@@ -2,66 +2,65 @@
 // Copyright (c) 2026 Wizzo Pty Ltd and the Zaparoo Project contributors.
 // SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0
 
-/// Sets `QT_QPA_PLATFORM=linuxfb` and `QT_QUICK_BACKEND=software`. Must
-/// be called before `QGuiApplication`. No-op on non-MiSTer builds.
+/// Sets `QT_QPA_PLATFORM=linuxfb`, `QT_QUICK_BACKEND=software`, and the
+/// configured linuxfb video mode before `QGuiApplication`. No-op on
+/// non-MiSTer builds.
 ///
-/// In the normal path, resolution is set by the `MiSTer` wrapper before
-/// launching us. With `--crt`, the launcher applies `[video]`
-/// width/height itself so Qt opens a small linuxfb surface while the
-/// custom core owns real CRT output.
+/// The launcher owns `MiSTer` resolution startup so restart-applied
+/// settings take effect on the very next process boot. Both the normal
+/// and `--crt` paths keep linuxfb in `rgb32`, which is the mode the
+/// launcher has been using in practice on `MiSTer`.
 pub fn apply_pre_qt_setup(config: &zaparoo_core::config::Config, crt_native_path_forced: bool) {
     #[cfg(zaparoo_runtime = "mister")]
     {
+        use tracing::info;
+
         std::env::set_var("QT_QPA_PLATFORM", "linuxfb");
         std::env::set_var("QT_QUICK_BACKEND", "software");
 
         if crt_native_path_forced {
-            tracing::info!(
-                "--crt: applying linuxfb mode {}x{} rgb16",
-                config.video_width,
-                config.video_height
+            info!(
+                "--crt: applying linuxfb mode {}x{} rgb32",
+                config.video_width, config.video_height
             );
-            run_vmode_with_format(config.video_width, config.video_height, "rgb16");
+            run_vmode_with_format(config.video_width, config.video_height, "rgb32");
+        } else {
+            info!(
+                "applying linuxfb mode {}x{} rgb32",
+                config.video_width, config.video_height
+            );
+            run_vmode_with_format(config.video_width, config.video_height, "rgb32");
         }
     }
     #[cfg(not(zaparoo_runtime = "mister"))]
     let _ = (config, crt_native_path_forced);
 }
 
-/// Run `vmode -r W H rgb32`. No-op on non-MiSTer builds. Called by the
-/// Settings screen to apply a freshly-picked resolution at runtime.
-pub fn run_vmode(width: u32, height: u32) {
-    run_vmode_with_format(width, height, "rgb32");
-}
-
+#[cfg(zaparoo_runtime = "mister")]
 fn run_vmode_with_format(width: u32, height: u32, pixel_format: &str) {
-    #[cfg(zaparoo_runtime = "mister")]
-    {
-        use tracing::warn;
-        let status = std::process::Command::new("vmode")
-            .args(["-r", &width.to_string(), &height.to_string(), pixel_format])
-            .status();
-        match status {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                warn!("vmode not found — display mode unchanged");
-            }
-            Err(e) => warn!("vmode error: {e}"),
-            Ok(s) if !s.success() => {
-                warn!(
-                    "vmode exited with {:?} — display mode may not have changed",
-                    s.code()
-                );
-            }
-            Ok(_) => {}
+    use tracing::warn;
+    let status = std::process::Command::new("vmode")
+        .args(["-r", &width.to_string(), &height.to_string(), pixel_format])
+        .status();
+    match status {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            warn!("vmode not found — display mode unchanged");
         }
+        Err(e) => warn!("vmode error: {e}"),
+        Ok(s) if !s.success() => {
+            warn!(
+                "vmode exited with {:?} — display mode may not have changed",
+                s.code()
+            );
+        }
+        Ok(_) => {}
     }
-    #[cfg(not(zaparoo_runtime = "mister"))]
-    let _ = (width, height, pixel_format);
 }
 
 /// Parse a `"WxH"` resolution string like `"1920x1080"` (case-insensitive
 /// `x`) into `(width, height)`. Returns `None` on empty input, missing
 /// separator, non-numeric components, or zero values.
+#[cfg(test)]
 pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
