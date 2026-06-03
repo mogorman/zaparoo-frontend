@@ -18,17 +18,40 @@ QtObject {
 
     // Visible tile-row covers: fewer at very low resolution to avoid crowding.
     readonly property int visibleCovers: screenHeight < 300 ? 3 : 5
-    // Paged grid shape: chosen by screen height so the same grid reads
-    // sensibly from MiSTer 240p through 1080p. Width × height of one
-    // page in tiles; product is the page size used by `PagedGrid`.
-    readonly property int gridColumns: screenHeight < 300 ? 3 : screenHeight < 600 ? 4 : 5
-    readonly property int gridRows: screenHeight < 300 ? 2 : 3
-    // Games grid shape — taller per-tile cover art than systems logos
-    // means a 5x3 layout starves vertical space, so games use 5x2 on
-    // desktop. The 240p MiSTer branch keeps a 3x2 layout for parity
-    // with the other rows on a small screen.
-    readonly property int gamesGridColumns: screenHeight < 300 ? 3 : screenHeight < 600 ? 4 : 5
-    readonly property int gamesGridRows: 2
+    // Shared browse-grid bounds. Systems and games both solve the same
+    // viewport-fit problem now, so the common limits live here and the
+    // per-surface configs only override what is materially different.
+    readonly property var _browseGridBaseConfig: ({
+        "minCellWidth": crtNativePath ? 72 : 160,
+        "preferredPageSize": crtNativePath ? 6 : 10,
+        "minColumns": 2,
+        "maxColumns": crtNativePath ? 3 : 5,
+        "minRows": 2,
+        "maxRows": crtNativePath ? 3 : 5
+    })
+    // Systems grid uses the same viewport-driven shape selection as
+    // games so both browse screens present a similar amount of content.
+    // Systems tiles are squarer than box-art tiles, so they target a
+    // slightly wider aspect while keeping the same preferred page size.
+    readonly property var _systemsGridConfig: _gridConfig(_browseGridBaseConfig, {
+        "minCellHeight": crtNativePath ? 72 : 160,
+        "targetAspect": 1.0
+    })
+    readonly property var _systemsGridShape: systemsGridShape(screenWidth, screenHeight)
+    readonly property int systemsGridColumns: _systemsGridShape.columns
+    readonly property int systemsGridRows: _systemsGridShape.rows
+    // Games grid shape comes from the logical viewport, not from
+    // screen-height-only breakpoints. The selector preserves a stable
+    // tile aspect while respecting a minimum readable tile size, so
+    // rotating the scene changes how many tiles fit without stretching
+    // the cards into a different shape.
+    readonly property var _gamesGridConfig: _gridConfig(_browseGridBaseConfig, {
+        "minCellHeight": crtNativePath ? 96 : 210,
+        "targetAspect": crtNativePath ? 0.78 : 0.71
+    })
+    readonly property var _gamesGridShape: gamesGridShape(screenWidth, screenHeight)
+    readonly property int gamesGridColumns: _gamesGridShape.columns
+    readonly property int gamesGridRows: _gamesGridShape.rows
     // Standard corner radius for rounded surfaces — tile cards, focus
     // rings (computed as `cornerRadius - outlineGap`), settings rows.
     // Pill controls (toggle track/thumb) use `height/2` instead and
@@ -69,6 +92,56 @@ QtObject {
 
     function half(value: real): int {
         return px(value / 2);
+    }
+
+    function gamesGridShape(viewportWidth: int, viewportHeight: int): var {
+        return root._selectGridShape(viewportWidth, viewportHeight, root._gamesGridConfig);
+    }
+
+    function systemsGridShape(viewportWidth: int, viewportHeight: int): var {
+        return root._selectGridShape(viewportWidth, viewportHeight, root._systemsGridConfig);
+    }
+
+    function _gridConfig(base: var, overrides: var): var {
+        const merged = {};
+        for (const key in base)
+            merged[key] = base[key];
+        for (const key in overrides)
+            merged[key] = overrides[key];
+        return merged;
+    }
+
+    function _selectGridShape(viewportWidth: int, viewportHeight: int, options: var): var {
+        const safeWidth = Math.max(1, viewportWidth);
+        const safeHeight = Math.max(1, viewportHeight);
+        let bestColumns = options.minColumns;
+        let bestRows = options.minRows;
+        let bestScore = Number.MAX_VALUE;
+
+        for (let columns = options.minColumns; columns <= options.maxColumns; columns++) {
+            const cellWidth = safeWidth / columns;
+            if (cellWidth < options.minCellWidth)
+                continue;
+            for (let rows = options.minRows; rows <= options.maxRows; rows++) {
+                const cellHeight = safeHeight / rows;
+                if (cellHeight < options.minCellHeight)
+                    continue;
+                const aspect = cellWidth / cellHeight;
+                const aspectError = Math.abs(Math.log(aspect / options.targetAspect));
+                const pagePenalty = Math.abs((columns * rows) - options.preferredPageSize) * 0.04;
+                const score = aspectError + pagePenalty;
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestColumns = columns;
+                    bestRows = rows;
+                }
+            }
+        }
+
+        return {
+            "columns": bestColumns,
+            "rows": bestRows
+        };
     }
 
     // Minimum 8px to remain legible on CRT 240p displays.

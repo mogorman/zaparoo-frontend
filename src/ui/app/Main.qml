@@ -68,7 +68,10 @@ MainLayout {
     // visual grid pageSize and produced half-loaded pages on every
     // subsequent cursor advance.
     readonly property int _gamesListFetchSize: 30
-    readonly property int _gamesPageSize: Browse.Settings.current_browse_layout === "list" ? root._gamesListFetchSize : Sizing.gamesGridColumns * Sizing.gamesGridRows
+    readonly property var _gamesGridShape: Sizing.gamesGridShape(Sizing.screenWidth, Sizing.screenHeight)
+    readonly property int _gamesGridColumns: root._gamesGridShape.columns
+    readonly property int _gamesGridRows: root._gamesGridShape.rows
+    readonly property int _gamesPageSize: Browse.Settings.current_browse_layout === "list" ? root._gamesListFetchSize : root._gamesGridColumns * root._gamesGridRows
     on_GamesPageSizeChanged: Browse.GamesModel.page_size = root._gamesPageSize
 
     // Bind Sizing to the scene's logical dimensions, not the

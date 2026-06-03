@@ -26,9 +26,13 @@ MediaListScreen {
 
     readonly property bool _portraitNonCrtList: !Theme.crtNativePath && Browse.Settings.current_orientation !== "horizontal"
     readonly property int _listPageSize: games._portraitNonCrtList ? 16 : 10
+    readonly property bool _tateOrientation: Browse.Settings.current_orientation !== "horizontal"
+    readonly property var _gridShape: Sizing.gamesGridShape(Sizing.screenWidth, Sizing.screenHeight)
+    readonly property int _gridColumns: games._gridShape.columns
+    readonly property int _gridRows: games._gridShape.rows
     readonly property int _browsePageSize: games._listLayout ? Math.max(1, games.listCard.visibleRowCount) : games.gamesGrid.pageSize
     readonly property bool _crtGridLayout: Theme.crtNativePath && !games._listLayout
-    readonly property bool _tateListLayout: Browse.Settings.current_orientation !== "horizontal"
+    readonly property bool _tateListLayout: games._tateOrientation
     readonly property string _gridViewId: "gamesGrid"
     readonly property string _listViewId: "gamesList"
     readonly property string _tateListViewId: "gamesListTate"
@@ -126,6 +130,8 @@ MediaListScreen {
         return qsTr("%1 / %2").arg(games.gamesGrid.currentIndex + 1).arg(total);
     }
     gridBottomMargin: games._footerProfile ? games._footerProfile.gridBottomMargin : (Sizing.pctH(6) + Sizing.pctH(8) + Sizing.pctH(7))
+    gridColumnsOverride: games._gridColumns
+    gridRowsOverride: games._gridRows
     gridTotalItemsOverride: Browse.GamesModel.dir_count + Browse.GamesModel.total_files
     gridHasMorePages: Browse.GamesModel.has_next_page
     gridLoadMoreAction: () => Browse.GamesModel.fetch_more()
