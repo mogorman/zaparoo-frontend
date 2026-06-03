@@ -53,6 +53,7 @@ MediaListScreen {
     detailShowDescription: false
     detailShowTitle: false
     detailLoadingText: qsTr("Loading game…")
+    pauseCoverRequestsDuringRapid: false
     detailCanPreviousImage: Browse.GamesModel.current_detail_image_can_prev
     detailCanNextImage: Browse.GamesModel.current_detail_image_can_next
     detailIdentityForIndex: function (index) {
@@ -129,7 +130,7 @@ MediaListScreen {
         const total = Math.max(1, Browse.GamesModel.dir_count + Browse.GamesModel.total_files);
         return qsTr("%1 / %2").arg(games.gamesGrid.currentIndex + 1).arg(total);
     }
-    gridBottomMargin: games._footerProfile ? games._footerProfile.gridBottomMargin : (Sizing.pctH(6) + Sizing.pctH(8) + Sizing.pctH(7))
+    gridBottomMargin: games._footerProfile ? games._footerProfile.gridBottomMargin : (Sizing.pctH(8) + Sizing.pctH(7))
     gridColumnsOverride: games._gridColumns
     gridRowsOverride: games._gridRows
     gridTotalItemsOverride: Browse.GamesModel.dir_count + Browse.GamesModel.total_files
