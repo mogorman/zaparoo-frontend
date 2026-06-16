@@ -40,6 +40,11 @@ Item {
     property bool detailReserveImageNav: false
     property var detailIdentityForIndex: null
     property var loadDetailForIndex: null
+    // Optional immediate (non-debounced) detail hook. Defaults (when null) to
+    // the model's `peek_detail_at`; GamesScreen overrides it with
+    // `peek_description_at`. Keeps the detail table identity-correct the instant
+    // the focus moves, so it never shows the previous row's metadata.
+    property var peekDetailForIndex: null
     property var clearDetailAction: null
     property var retryAction: null
     property var acceptAction: null
@@ -72,8 +77,21 @@ Item {
     property alias activeLabel: activeLabel
 
     property bool transitioning: false
+    property bool active: true
     property bool gridFocused: true
     property bool optimisticLoading: false
+    // False until the user takes control of focus (first input). Combined with
+    // `_restoreDone` into `_focusReady`, which gates whether the grid tiles and
+    // list rows render selection at all.
+    property bool _focusArmed: false
+    // Set true once the selection has been finalized from persisted state
+    // (restoreSelection for favorites/recents; Main.qml's
+    // `_setGamesRestoreIndex` for games). Combined with `_focusArmed` into
+    // `_focusReady`, which gates whether the grid tiles and list rows render
+    // selection at all - so the default index 0 never paints before restore
+    // lands on a cold-start / forward entry.
+    property bool _restoreDone: false
+    readonly property bool _focusReady: root._focusArmed || root._restoreDone
     property bool detailRapidScrollActive: false
     property bool detailRapidIndicatorActive: detailRapidScrollActive
     property string detailRapidScrollAction: ""
@@ -128,6 +146,29 @@ Item {
         focusedDetail.requestNow();
     }
 
+    // Layout-aware pulse routing. In grid layout this forwards to the
+    // PagedGrid tile; in list layout it increments the BrowseListDetailView
+    // pulse so the selected row fires its push-in. The same push-in cue
+    // serves both forward navigation and game launch.
+    function pulseActivate(): void {
+        if (root._listLayout)
+            listCard.activatePulse++;
+        else
+            mediaGrid.pulseActivate();
+    }
+
+    // Settle the push-in cue back to rest after a launch that keeps the
+    // frontend on the same screen (a launcher that does not take the FPGA or
+    // quit us, e.g. an Audio track). Routed like pulseActivate to whichever
+    // layout is live. Not called for forward navigation, which transitions the
+    // screen and resets the cue off-screen on its own.
+    function releaseActivate(): void {
+        if (root._listLayout)
+            listCard.releasePulse++;
+        else
+            mediaGrid.releaseActivate();
+    }
+
     function _count(): int {
         return root.mediaModel !== null ? root.mediaModel.count : 0;
     }
@@ -155,6 +196,9 @@ Item {
     function restoreSelection(): void {
         if (root._count() <= 0)
             return;
+        // The model is loaded; the selection is now finalized (either the
+        // saved path below or the default index 0). Let the tiles/rows render.
+        root._restoreDone = true;
         const path = typeof root.restoreSelectionPath === "function" ? (root.restoreSelectionPath() ?? "") : (root.mediaState !== null ? (root.mediaState.selected_path ?? "") : "");
         if (path === "")
             return;
@@ -181,6 +225,7 @@ Item {
     function _focusIndex(index: int): void {
         if (index < 0 || index >= mediaGrid.itemCount)
             return;
+        root._focusArmed = true;
         mediaGrid.currentIndex = index;
     }
 
@@ -271,6 +316,8 @@ Item {
         if ((action === "left" || action === "right" || action === "up" || action === "down" || action === "context_menu") && root._gateHide)
             return;
 
+        root._focusArmed = true;
+
         if (action === "left") {
             if (root._listLayout && typeof root.listLeftAction === "function")
                 root.listLeftAction();
@@ -316,10 +363,13 @@ Item {
                     root.mediaModel.fetch_more();
                 return;
             }
-            if (typeof root.acceptAction === "function")
+            if (typeof root.acceptAction === "function") {
                 root.acceptAction(mediaGrid.currentIndex);
-            else
-                root.mediaModel.launch_at(mediaGrid.currentIndex);
+            } else {
+                root.pulseActivate();
+                defaultLaunchCommit._idx = mediaGrid.currentIndex;
+                defaultLaunchCommit.arm();
+            }
         } else if (action === "context_menu") {
             if (mediaGrid.itemCount > 0) {
                 const idx = mediaGrid.currentIndex;
@@ -337,6 +387,26 @@ Item {
         }
     }
 
+    // Defers the default launch_at call so the push-in cue (pulseActivate)
+    // completes on a static scene before Core takes the FPGA.
+    // Only used when no `acceptAction` override is provided (Favorites,
+    // Recents). GamesScreen owns its own pressCommit with folder routing.
+    DeferredAction {
+        id: defaultLaunchCommit
+        property int _idx: -1
+        onDeferred: {
+            const i = _idx;
+            _idx = -1;
+            if (i >= 0 && root.mediaModel !== null) {
+                root.mediaModel.launch_at(i);
+                // Settle the push-in back to rest. If the launch takes the FPGA
+                // or kills us the release is never seen; if it stays on the page
+                // (e.g. an Audio track) the cue does not stick pushed in.
+                root.releaseActivate();
+            }
+        }
+    }
+
     FocusedMediaDetailController {
         id: focusedDetail
 
@@ -346,6 +416,7 @@ Item {
         rapidScrollActive: root.detailRapidScrollActive
         identityForIndex: root.detailIdentityForIndex
         loadForIndex: root.loadDetailForIndex
+        peekForIndex: root.peekDetailForIndex
         clearDetail: root.clearDetailAction
         mediaModel: root.mediaModel
     }
@@ -383,6 +454,7 @@ Item {
         totalItemsOverride: root.totalItemsOverride
         targetVisibleRowCount: root.targetVisibleRowCount
         currentIndex: mediaGrid.currentIndex
+        focusReady: root._focusReady
         detailTitle: listCard.currentName
         detailCoverKey: root.detailRapidScrollActive ? root.detailPlaceholderKey : (root._detailImageKey() !== "" ? root._detailImageKey() : listCard.currentCoverKey)
         detailShowDescription: root.detailShowDescription
@@ -390,6 +462,7 @@ Item {
         detailTags: root._detailTags()
         detailLoading: root._detailLoading()
         detailSuppressed: root.detailRapidScrollActive
+        screenSettling: !root.active
         detailLoadingText: root.detailLoadingText
         detailCanPreviousImage: root.detailCanPreviousImage
         detailCanNextImage: root.detailCanNextImage
@@ -417,6 +490,8 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.gridBottomMargin
         focused: root.gridFocused
+        screenSettling: !root.active
+        focusReady: root._focusReady
         model: root.mediaModel
         delegate: Tile {
             layoutProfile: root._gridLayoutProfile

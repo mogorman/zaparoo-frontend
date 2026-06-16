@@ -4,6 +4,7 @@
 
 import QtQuick
 import Zaparoo.Theme
+import Zaparoo.Ui
 import Zaparoo.Browse as Browse
 
 // cxx-qt 0.8 patches `isFinal: true` on singleton properties but the
@@ -60,6 +61,7 @@ MediaListScreen {
         return systemId !== "" && path !== "" ? systemId + "\n" + path : "";
     }
     loadDetailForIndex: index => Browse.GamesModel.load_description_at(index)
+    peekDetailForIndex: index => Browse.GamesModel.peek_description_at(index)
     clearDetailAction: () => Browse.GamesModel.clear_current_detail()
     restoreSelectionPath: () => {
         const selected = Browse.GamesState.selected_at_level;
@@ -88,15 +90,28 @@ MediaListScreen {
     acceptAction: index => {
         const entryType = Browse.GamesModel.entry_type_at(index);
         if ((entryType === "directory" || entryType === "root") && !Browse.GamesModel.is_media_capable_at(index)) {
+            // Persist synchronously (MiSTer may be killed at any time), then
+            // play the cue and defer the navigation signal so the push-in
+            // completes on a static scene before the model reload starts.
             games.flushSelectedPersist();
-            games.requestNavigateIntoFolder(Browse.GamesModel.path_at(index));
+            games.pulseActivate();
+            pressCommit._folderPath = Browse.GamesModel.path_at(index);
+            pressCommit.arm();
             return;
         }
+        // State persistence is synchronous; launch_at is deferred so the
+        // push-in cue plays on a fully static scene before Core takes the
+        // FPGA. Launch shares the same push-in as forward navigation.
         games._scheduleSelectedPersist(Browse.GamesModel.path_at(index));
         games.flushSelectedPersist();
-        Browse.GamesModel.launch_at(index);
+        games.pulseActivate();
+        pressCommit._launchIndex = index;
+        pressCommit.arm();
     }
     cancelAction: () => {
+        // Disarm any pending accept so a press-then-back inside the deferred
+        // window cannot launch/navigate after the user has backed out.
+        pressCommit.stop();
         games.flushSelectedPersist();
         if (games._atFolderLevel())
             games.requestNavigateOutOfFolder();
@@ -184,6 +199,27 @@ MediaListScreen {
     // 250 ms interval is shorter than a deliberate single tap → hold
     // gap, so isolated presses still persist quickly.
     property string _pendingSelectedPath: ""
+
+    DeferredAction {
+        id: pressCommit
+        property string _folderPath: ""
+        property int _launchIndex: -1
+        onDeferred: {
+            if (_folderPath !== "") {
+                const p = _folderPath;
+                _folderPath = "";
+                games.requestNavigateIntoFolder(p);
+            } else if (_launchIndex >= 0) {
+                const idx = _launchIndex;
+                _launchIndex = -1;
+                Browse.GamesModel.launch_at(idx);
+                // Settle the push-in back to rest. Invisible when the launch
+                // takes the FPGA or kills us; prevents a stuck pushed-in tile
+                // when the launcher stays on the page (e.g. an Audio track).
+                games.releaseActivate();
+            }
+        }
+    }
 
     Timer {
         id: persistDebounce

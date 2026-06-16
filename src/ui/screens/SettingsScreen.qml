@@ -56,6 +56,19 @@ Item {
     property string currentPage: settings.pageRoot
     readonly property bool showingRootGrid: settings.currentPage === settings.pageRoot
     property var _pageIndexes: ({})
+    // Incremented when the user accepts a category tile so it plays the
+    // push-in animation. Forwarded to all category TileLoaders.
+    property int activatePulse: 0
+    // Sibling of `activatePulse` for the in-page SettingsField rows: bumped on
+    // a field accept so the focused non-toggle row plays its push-in tap.
+    // Toggle rows ignore it (their knob slide is the feedback).
+    property int fieldActivatePulse: 0
+    // True for one event-loop tick during a page switch. Passed as
+    // `animateChanges: false` to SettingsField delegates so a reused delegate
+    // does not animate its toggle-knob slide when the new page's field model
+    // lands. Normal user navigation animates because `_pageSwitching` is false
+    // at that point.
+    property bool _pageSwitching: false
 
     // Page-aware field registries. The root mirrors console settings
     // menus: stable domain categories first, short subpages second.
@@ -148,6 +161,11 @@ Item {
             kind: "field",
             id: "mouseEnabled",
             label: qsTr("Mouse support")
+        },
+        {
+            kind: "field",
+            id: "reduceMotion",
+            label: qsTr("Reduce motion")
         }
     ]
     readonly property var libraryDataFields: [
@@ -335,7 +353,7 @@ Item {
     }
 
     function _fieldControl(id: string): string {
-        if (id === "mouseEnabled" || id === "showHidden" || id === "discoverArcadeAlternateVersions" || id === "debugLogging" || id === "rescrapeExisting")
+        if (id === "mouseEnabled" || id === "showHidden" || id === "discoverArcadeAlternateVersions" || id === "debugLogging" || id === "rescrapeExisting" || id === "reduceMotion")
             return "toggle";
         if (id === "aboutLicense" || id === "pageDisplayInterface" || id === "pageControlsInput" || id === "pageLibraryData" || id === "pageSupportAbout")
             return "navigate";
@@ -353,6 +371,8 @@ Item {
             return settings._visibleRescrapeExisting;
         if (id === "showHidden")
             return Browse.Settings.current_show_hidden;
+        if (id === "reduceMotion")
+            return Browse.Settings.current_reduce_motion;
         return Browse.Settings.current_mouse_enabled;
     }
 
@@ -439,7 +459,7 @@ Item {
         if (!settings._isField(settings.currentIndex))
             return false;
         const id = settings.fields[settings.currentIndex].id;
-        return id === "mouseEnabled" || id === "showHidden" || id === "discoverArcadeAlternateVersions" || id === "debugLogging" || id === "rescrapeExisting";
+        return id === "mouseEnabled" || id === "showHidden" || id === "discoverArcadeAlternateVersions" || id === "debugLogging" || id === "rescrapeExisting" || id === "reduceMotion";
     }
     // True when the focused field is a list-picker row (Accept opens a
     // modal; left/right is a no-op — pickers don't cycle inline). Drives
@@ -828,6 +848,14 @@ Item {
         Browse.Settings.set_debug_logging(!Browse.Settings.current_debug_logging);
     }
 
+    function _setReduceMotion(direction: int): void {
+        Browse.Settings.set_reduce_motion(direction > 0);
+    }
+
+    function _toggleReduceMotion(): void {
+        Browse.Settings.set_reduce_motion(!Browse.Settings.current_reduce_motion);
+    }
+
     function _setDiscoverArcadeAlternateVersions(direction: int): void {
         Browse.Settings.set_discover_arcade_alternate_versions(direction > 0);
     }
@@ -865,6 +893,8 @@ Item {
             settings._setDebugLogging(direction);
         else if (id === "rescrapeExisting")
             settings._setRescrapeExisting(direction);
+        else if (id === "reduceMotion")
+            settings._setReduceMotion(direction);
     }
 
     function _rememberPageFocus(): void {
@@ -881,26 +911,47 @@ Item {
     }
 
     function _switchPage(page: string): void {
+        // Disable SettingsField Behaviors for this synchronous block so
+        // reused delegates don't animate focus-border or toggle-position
+        // changes when the new page's field model lands. The flag is
+        // cleared on the next event-loop tick so subsequent user moves
+        // still animate normally.
+        settings._pageSwitching = true;
         settings._rememberPageFocus();
         settings.currentPage = page;
         settings._restorePageFocus();
+        Qt.callLater(() => {
+            settings._pageSwitching = false;
+        });
     }
 
     function _openPage(id: string): bool {
+        // Resolve the target page first so we can return false quickly for
+        // non-page IDs. Then fire the pulse (cue plays on the still-visible
+        // tile) and defer _switchPage so the push-in's downward leg is
+        // fully visible before the page swaps out.
+        let page = "";
         if (id === "pageDisplayInterface")
-            settings._switchPage(settings.pageDisplayInterface);
+            page = settings.pageDisplayInterface;
         else if (id === "pageControlsInput")
-            settings._switchPage(settings.pageControlsInput);
+            page = settings.pageControlsInput;
         else if (id === "pageLibraryData")
-            settings._switchPage(settings.pageLibraryData);
+            page = settings.pageLibraryData;
         else if (id === "pageSupportAbout")
-            settings._switchPage(settings.pageSupportAbout);
+            page = settings.pageSupportAbout;
         else
             return false;
+        settings.activatePulse++;
+        pressCommit._page = page;
+        pressCommit.arm();
         return true;
     }
 
     function _goBack(): void {
+        // Disarm pending accepts so a press-then-back inside the deferred
+        // window cannot drill into a subpage / open a picker after backing out.
+        pressCommit.stop();
+        fieldCommit.stop();
         if (settings.currentPage !== settings.pageRoot) {
             settings._switchPage(settings.pageRoot);
             return;
@@ -940,17 +991,59 @@ Item {
             const id = settings.fields[settings.currentIndex].id;
             if (settings._openPage(id))
                 return;
-            if (id === "mouseEnabled")
-                settings._toggleMouseEnabled();
-            else if (id === "showHidden")
-                settings._toggleShowHidden();
-            else if (id === "discoverArcadeAlternateVersions")
-                settings._toggleDiscoverArcadeAlternateVersions();
-            else if (id === "debugLogging")
-                settings._toggleDebugLogging();
-            else if (id === "rescrapeExisting")
-                settings._toggleRescrapeExisting();
-            else if (id === "updateMediaDb")
+            // Toggles flip in place — the knob slide is their cue, so act now
+            // and skip the push-in.
+            if (settings._fieldControl(id) === "toggle") {
+                if (id === "mouseEnabled")
+                    settings._toggleMouseEnabled();
+                else if (id === "showHidden")
+                    settings._toggleShowHidden();
+                else if (id === "discoverArcadeAlternateVersions")
+                    settings._toggleDiscoverArcadeAlternateVersions();
+                else if (id === "debugLogging")
+                    settings._toggleDebugLogging();
+                else if (id === "rescrapeExisting")
+                    settings._toggleRescrapeExisting();
+                else if (id === "reduceMotion")
+                    settings._toggleReduceMotion();
+                return;
+            }
+            // Picker / action / about either open a modal or navigate away,
+            // which would cover or replace the row before its push-in could
+            // show. Play the cue, then run the action deferred (the same
+            // deferred-flip the tiles use) so the press is visible on the
+            // still-static settings screen first.
+            settings.fieldActivatePulse++;
+            fieldCommit._id = id;
+            fieldCommit.arm();
+        } else if (action === "cancel") {
+            settings._goBack();
+        }
+    }
+
+    // ── Visual tree ───────────────────────────────────────────────────────────
+
+    DeferredAction {
+        id: pressCommit
+        property string _page: ""
+        onDeferred: {
+            const p = _page;
+            _page = "";
+            settings._switchPage(p);
+        }
+    }
+
+    // Deferred-flip for non-toggle field activations: the focused row's push-in
+    // plays on the still-visible settings screen, then this fires `pressMs`
+    // later to open the modal / navigate. Without the defer the modal scrim or
+    // screen change covers the row before the cue can render.
+    DeferredAction {
+        id: fieldCommit
+        property string _id: ""
+        onDeferred: {
+            const id = fieldCommit._id;
+            fieldCommit._id = "";
+            if (id === "updateMediaDb")
                 settings._triggerIndex();
             else if (id === "runScraper")
                 settings._triggerScrape();
@@ -960,12 +1053,8 @@ Item {
                 settings.requestAccept("aboutLicense");
             else
                 settings._openPickerForField(id);
-        } else if (action === "cancel") {
-            settings._goBack();
         }
     }
-
-    // ── Visual tree ───────────────────────────────────────────────────────────
 
     MouseArea {
         anchors.fill: parent
@@ -1069,6 +1158,7 @@ Item {
                     isFocused: true
                     name: categoryCell.modelData.label
                     coverKey: categoryCell.modelData.coverKey
+                    activatePulse: settings.activatePulse
                 }
 
                 MouseArea {
@@ -1177,6 +1267,8 @@ Item {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         isFocused: row.index === settings.currentIndex
+                        animateChanges: !settings._pageSwitching
+                        activatePulse: settings.fieldActivatePulse
                         // Index and scrape can't run together; while
                         // one operation is in flight the other row
                         // dims and its MouseArea stops responding.
@@ -1201,6 +1293,8 @@ Item {
                                 settings._toggleDebugLogging();
                             else if (row.modelData.id === "rescrapeExisting")
                                 settings._toggleRescrapeExisting();
+                            else if (row.modelData.id === "reduceMotion")
+                                settings._toggleReduceMotion();
                         }
                         onRightClicked: settings._goBack()
                         // Picker, action, and navigate rows route
@@ -1212,16 +1306,12 @@ Item {
                             settings.currentIndex = row.index;
                             if (settings._openPage(row.modelData.id))
                                 return;
-                            if (row.modelData.id === "updateMediaDb")
-                                settings._triggerIndex();
-                            else if (row.modelData.id === "runScraper")
-                                settings._triggerScrape();
-                            else if (row.modelData.id === "uploadLog")
-                                settings.requestAccept("uploadLog");
-                            else if (row.modelData.id === "aboutLicense")
-                                settings.requestAccept("aboutLicense");
-                            else
-                                settings._openPickerForField(row.modelData.id);
+                            // Non-toggle rows route here (toggles use onClicked).
+                            // Defer like the keyboard path so the push-in shows
+                            // before the modal opens / the screen navigates.
+                            settings.fieldActivatePulse++;
+                            fieldCommit._id = row.modelData.id;
+                            fieldCommit.arm();
                         }
                     }
                 }

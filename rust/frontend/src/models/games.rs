@@ -433,6 +433,9 @@ pub mod ffi {
         fn description_at(self: &GamesModel, index: i32) -> QString;
 
         #[qinvokable]
+        fn peek_description_at(self: Pin<&mut GamesModel>, index: i32);
+
+        #[qinvokable]
         fn load_description_at(self: Pin<&mut GamesModel>, index: i32);
 
         #[qinvokable]
@@ -872,6 +875,56 @@ impl ffi::GamesModel {
             return QString::default();
         }
         QString::from(self.entries[index as usize].description.as_str())
+    }
+
+    // Immediate, non-debounced sibling of `load_description_at`. Called the
+    // moment the focused row changes so the detail pane reflects THIS row's
+    // local metadata (description + entry tags) at once, instead of holding the
+    // previous row's values through the load debounce. The debounced
+    // `load_description_at` then enriches it from media.meta. Games entries
+    // carry their own tags, so this needs no metadata cache.
+    fn peek_description_at(mut self: Pin<&mut Self>, index: i32) {
+        self.as_mut()
+            .rust_mut()
+            .description_seq
+            .fetch_add(1, Ordering::SeqCst);
+        if index < 0 || index >= self.count {
+            self.as_mut().set_current_detail_loading(false);
+            self.as_mut().set_current_description(QString::default());
+            self.as_mut().set_current_detail_tags(QString::default());
+            clear_detail_images(self.as_mut());
+            return;
+        }
+        self.as_mut().rust_mut().detail_prefetch_row = Some(index);
+        prefetch_cursor_window(&self, index);
+
+        let entry = &self.entries[index as usize];
+        if !is_media_capable_entry(entry) {
+            self.as_mut().set_current_detail_loading(false);
+            self.as_mut().set_current_description(QString::default());
+            self.as_mut().set_current_detail_tags(QString::default());
+            clear_detail_images(self.as_mut());
+            return;
+        }
+
+        let description = entry.description.clone();
+        let detail_tags = detail_tags_from_entry(entry);
+        // Local tags paint immediately, so mark loading without blanking: the
+        // detail pane shows this row's values while the richer media.meta fetch
+        // is still pending.
+        self.as_mut().set_current_detail_loading(true);
+        self.as_mut()
+            .set_current_description(QString::from(description.as_str()));
+        self.as_mut()
+            .set_current_detail_tags(QString::from(detail_tags.as_str()));
+        // Deliberately do NOT switch the visible cover here. The cover has its
+        // own grace-window hold (BrowseDetailPane coverHold) and is settled by
+        // the debounced `load_description_at`. Re-pointing the 512px cover Image
+        // on every keypress kept `_coverBusy` true through sustained navigation
+        // (tripping the hourglass after the grace) and monopolized Qt's async
+        // image loader so the next-row cover never got prefetched. Peek only
+        // updates the metadata table and warms the prefetch hints below.
+        refresh_adjacent_cover_prefetch(self.as_mut());
     }
 
     #[allow(

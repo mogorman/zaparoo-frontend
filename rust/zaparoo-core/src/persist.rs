@@ -120,6 +120,8 @@ pub struct SettingsState {
     #[serde(default = "default_mouse_enabled")]
     pub mouse_enabled: bool,
     #[serde(default)]
+    pub reduce_motion: bool,
+    #[serde(default)]
     pub discover_arcade_alternate_versions: bool,
     #[serde(default)]
     pub debug_logging: bool,
@@ -148,6 +150,7 @@ impl Default for SettingsState {
             browse_layout: default_browse_layout(),
             button_layout: default_button_layout(),
             mouse_enabled: default_mouse_enabled(),
+            reduce_motion: false,
             discover_arcade_alternate_versions: false,
             debug_logging: false,
             screensaver_timeout: default_screensaver_timeout(),
@@ -325,6 +328,7 @@ mod tests {
                 browse_layout: "list".into(),
                 button_layout: "b".into(),
                 mouse_enabled: false,
+                reduce_motion: true,
                 discover_arcade_alternate_versions: true,
                 debug_logging: true,
                 screensaver_timeout: "300".into(),
@@ -358,6 +362,8 @@ resolution = "1920x1080"
         assert_eq!(state.hub.hidden_categories, Vec::<String>::new());
         assert_eq!(state.systems.hidden_system_ids, Vec::<String>::new());
         assert!(!state.settings.show_hidden);
+        // reduce_motion absent from an older state file defaults to false.
+        assert!(!state.settings.reduce_motion);
     }
 
     #[test]

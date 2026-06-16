@@ -56,6 +56,33 @@ Item {
     property bool coverLoadingPaused: false
     property bool rapidRenderMode: false
     readonly property int _coverRetentionPages: Math.max(1, Math.ceil(Sizing.visibleCovers))
+    // Pulse counter for the one-shot tile push-in. Callers increment via
+    // pulseActivate(); TileLoader forwards the value to Tile where only the
+    // focused+selected delegate fires its cue. The same cue serves both
+    // forward navigation and game launch.
+    property int activatePulse: 0
+    function pulseActivate(): void {
+        root.activatePulse++;
+    }
+    // Release counter for the push-in cue. Callers increment via
+    // releaseActivate() to settle the focused tile back to rest after a launch
+    // that keeps the frontend on the same screen (e.g. an Audio track). Forward
+    // navigation never calls this — the screen transition + `settling` reset
+    // handle the held scale off-screen.
+    property int releasePulse: 0
+    function releaseActivate(): void {
+        root.releasePulse++;
+    }
+    // When true, Tile delegates reset their push-in scale back to 1.0
+    // so a held push-in from the previous visit does not persist when
+    // the screen is shown again. Set by the host screen to `!active`
+    // (i.e. true while the screen is off-screen).
+    property bool screenSettling: false
+    // Forwarded to each Tile's focus-visibility gate. Host screens leave this
+    // false until the grid's selection is finalized (restore or first input)
+    // so the default tile 0 never paints a ring before restore lands; default
+    // true keeps focus rendering on for hosts that do not wire it.
+    property bool focusReady: true
     property var layoutProfile: null
     readonly property var _gridProfile: root.layoutProfile && root.layoutProfile.grid ? root.layoutProfile.grid : null
 
@@ -600,6 +627,17 @@ Item {
                     color: Theme.surfaceCard
                     border.color: Theme.borderMid
                     border.width: Sizing.stroke(1)
+                    // Track the loaded Tile's push-in scale so the card
+                    // silhouette and the Tile surface shrink together.
+                    // Falls back to 1.0 when no Tile is loaded (skeleton
+                    // state), so the placeholder stays full-size until
+                    // the Tile appears. `cardScale` is a readonly alias
+                    // for `_activateScale` exposed by Tile for exactly
+                    // this cross-sibling binding.
+                    transformOrigin: Item.Center
+                    // qmllint disable missing-property
+                    scale: tileLoader.status === Loader.Ready && tileLoader.item ? tileLoader.item.cardScale : 1.0
+                    // qmllint enable missing-property
                 }
 
                 // Standalone selected-cell ring for skeleton/rapid mode.
@@ -616,7 +654,7 @@ Item {
                     color: Theme.accent
                     radius: Math.max(0, Sizing.cornerRadius - Sizing.pctH(0.4))
                     antialiasing: true
-                    visible: cellItem.isSelected && root.focused && (root.rapidRenderMode || tileLoader.status !== Loader.Ready)
+                    visible: cellItem.isSelected && root.focused && root.focusReady && (root.rapidRenderMode || tileLoader.status !== Loader.Ready)
                 }
 
                 Rectangle {
@@ -657,6 +695,10 @@ Item {
                     coverKey: cellItem._gatedCoverKey
                     favorite: cellItem.favorite
                     hidden: cellItem.hidden
+                    activatePulse: root.activatePulse
+                    releasePulse: root.releasePulse
+                    settling: root.screenSettling
+                    focusReady: root.focusReady
                 }
 
                 MouseArea {
@@ -691,10 +733,12 @@ Item {
     // Up arrow at the top, down arrow at the bottom, free-floating thumb
     // in between. No painted track — the indicator is just the arrows
     // and the thumb. Hidden when the dataset fits on a single page.
-    // Snaps page-by-page; no animation on the thumb (matches the instant
-    // page flip and keeps the software renderer's dirty rect off the
-    // cell area). Sits after the cell `track` in the visual tree so the
-    // indicator paints on top of any focus-scale bleed at the right edge.
+    // The thumb snaps to each page position with no glide animation:
+    // scrolling is a hot path (cover prefetch + data load run on the same
+    // frames), so an animated thumb would repaint while the system is
+    // already busy.
+    // Sits after the cell `track` in the visual tree so the indicator
+    // paints on top of any brief scale-animation bleed at the right edge.
     Item {
         id: scrollGutter
 
